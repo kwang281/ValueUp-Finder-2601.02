@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+plotly
+opendartreader
+finance-datareader
+requests
+beautifulsoup4
+cryptography
+matplotlib
