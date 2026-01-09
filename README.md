@@ -1,5 +1,5 @@
 
-# Value-Up Finder (v2601.01) 애플리케이션 가이드
+# Value-Up Finder (v2601.02) 애플리케이션 가이드
   
 
 **Value-Up Finder**는 소위 '저평가 우량주(Value-Up)'를 발굴하기 위한 **주식 분석 대시보드**입니다.
