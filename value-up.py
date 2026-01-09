@@ -24,7 +24,7 @@ from api.company_guide import get_batch_company_data
 
 from api.naver_news import fetch_naver_news_search
 
-from utils.security import save_credentials, load_credentials, verify_pin, check_credentials_exist
+from utils.security import save_credentials, load_credentials, verify_pin, check_credentials_exist, load_from_env
 
 from utils.logger import log_transition
 
