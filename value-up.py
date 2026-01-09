@@ -53,9 +53,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# KST Timezone Definition (UTC+9)
+KST = datetime.timezone(datetime.timedelta(hours=9))
 
 
-# --- [Caching Layer] JSON File Management ---
 
 # --- [Caching Layer] JSON File Management ---
 
@@ -88,8 +89,7 @@ def save_favorites_to_disk(analysis_favs, trend_favs):
 
 def get_valid_cache():
     """
-
-    매일 16:00 기준으로 유효한 캐시 파일이 있는지 확인하고 로드합니다.
+    매일 16:00 (KST/UTC+9) 기준으로 유효한 캐시 파일이 있는지 확인하고 로드합니다.
 
     파일명 형식: company_data_YYYYMMDD_HHMMSS.json
     """
@@ -101,43 +101,36 @@ def get_valid_cache():
         return None
 
 
-    # 기준 시간 설정 (매일 16:00)
-
-    now = datetime.datetime.now()
+    # 기준 시간 설정 (매일 16:00 KST)
+    now = datetime.datetime.now(KST)
 
     cutoff_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
     
 
     # 현재 시간이 16:00 이전이면, 어제 16:00가 기준
-
     if now < cutoff_time:
-
         cutoff_time = cutoff_time - datetime.timedelta(days=1)
         
 
     # 캐시 파일 검색
-
     files = glob.glob(os.path.join(CACHE_DIR, "company_data_*.json"))
 
     if not files:
-
         return None
         
 
     # 최신 파일 찾기
-
     latest_file = max(files, key=os.path.getctime)
     
 
     # 파일명에서 시간 파싱 (company_data_20241220_160500.json)
-
     try:
-
         filename = os.path.basename(latest_file)
-
         time_str = filename.replace("company_data_", "").replace(".json", "")
 
-        file_time = datetime.datetime.strptime(time_str, "%Y%m%d_%H%M%S")
+        # 파일명 시간은 timezone 정보가 없으므로(naive), KST로 가정하고 변환
+        file_time_naive = datetime.datetime.strptime(time_str, "%Y%m%d_%H%M%S")
+        file_time = file_time_naive.replace(tzinfo=KST)
         
 
         # 유효성 검사 (기준 시간 이후 생성된 파일인가?)
@@ -178,7 +171,7 @@ def save_daily_cache(df):
         os.makedirs(CACHE_DIR, exist_ok=True)
         
 
-    now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    now_str = datetime.datetime.now(KST).strftime("%Y%m%d_%H%M%S")
 
     filepath = os.path.join(CACHE_DIR, f"company_data_{now_str}.json")
     
