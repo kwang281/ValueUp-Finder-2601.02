@@ -46,7 +46,7 @@ atexit.register(save_state)
 
 # --- [Configuration] 페이지 설정 ---
 st.set_page_config(
-    page_title="Value-Up Finder (2601.01)",
+    page_title="Value-Up Finder (2601.02)",
     page_icon="📈",
     layout="wide",
 
@@ -1796,22 +1796,27 @@ def main():
     st.sidebar.subheader("🔐 API 설정 (보안)")
 
 
-    # 1. Existing Credentials Check
-
+    # 1. Environment Variable Check (GitHub Actions / DotEnv)
+    env_key = load_from_env()
+    
+    # 2. Existing Credentials Check (Local)
     has_creds = check_credentials_exist()
     
 
     # Session Initialize
-
     if 'api_key' not in st.session_state: 
-
-        st.session_state['api_key'] = None
+        st.session_state['api_key'] = env_key if env_key else None
         
-
     current_key = st.session_state['api_key']
 
+    # Decide UI Flow
+    if env_key:
+        st.sidebar.success("🔐 API Key (시스템/환경변수)")
+        # Skip Setup/Unlock forms if Env Key is present and active
+        current_key = env_key # Ensure it's set
+        st.session_state['api_key'] = env_key
 
-    if has_creds:
+    elif has_creds:
 
         if current_key:
 
