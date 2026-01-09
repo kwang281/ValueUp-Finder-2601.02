@@ -66,6 +66,10 @@ def load_credentials(pin: str):
     except Exception:
         return None # 복호화 실패 (PIN 불일치 등)
 
+def load_from_env():
+    """환경 변수에서 API Key를 로드합니다 (GitHub Actions 등)."""
+    return os.environ.get("OPENDART_API")
+
 def check_credentials_exist():
     """자격 증명 파일이 존재하는지 확인합니다."""
     return os.path.exists(SECRETS_FILE)
