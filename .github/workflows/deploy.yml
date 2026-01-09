@@ -1,0 +1,21 @@
+name: Deploy Streamlit App
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run App
+        env:
+          OPENDART_API: ${{ secrets.OPENDART_API }}
+        run: |
+          streamlit run value-up.py
