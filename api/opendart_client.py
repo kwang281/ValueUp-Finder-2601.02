@@ -13,25 +13,41 @@ class OpenDartClient:
                 self.init_error = str(e)
                 print(f"Error initializing OpenDartReader: {e}")
 
-    def get_financial_summary(self, corp_code, year, reprt_code='11011'):
+    def get_financial_summary(self, corp_code, year, reprt_code=None):
         """
         특정 기업의 재무제표 주요 항목을 가져옵니다.
-        reprt_code: 11011(사업보고서), 11012(반기보고서), 11013(1분기보고서), 11014(3분기보고서)
+        reprt_code가 지정되지 않으면 연말(11011) -> 3분기(11014) -> 반기(11012) -> 1분기(11013) 순으로 조회합니다.
         """
         if not self.dart:
             return None
 
+        # 순회할 보고서 코드 리스트 (우선순위: 사업 > 3분기 > 반기 > 1분기)
+        if reprt_code:
+            search_codes = [reprt_code]
+        else:
+            search_codes = ['11011', '11014', '11012', '11013']
+
+        finstate = None
+        used_reprt_code = None
+
         try:
-            # 재무제표 조회 (연결 재무제표 우선, 없으면 별도)
-            # fs_div: CFS(연결), OFS(별도)
-            finstate = self.dart.finstate(corp_code, year, reprt_code=reprt_code)
+            for code in search_codes:
+                try:
+                    # 재무제표 조회 (연결 재무제표 우선, 없으면 별도)
+                    # fs_div: CFS(연결), OFS(별도)
+                    temp_finstate = self.dart.finstate(corp_code, year, reprt_code=code)
+                    if temp_finstate is not None and not temp_finstate.empty:
+                        finstate = temp_finstate
+                        used_reprt_code = code
+                        break
+                except Exception:
+                    continue
             
             if finstate is None or finstate.empty:
                 return None
 
             # 필요한 계정 항목 추출 로직
             # OpenDart API는 계정명이 '자산총계', '자본총계' 등으로 나옴.
-            # 데이터프레임 필터링
             
             # 관심 있는 계정명 리스트
             target_accounts = {
@@ -39,10 +55,15 @@ class OpenDartClient:
                 '부채총계': ['부채총계', '부채'],
                 '자본총계': ['자본총계', '자본'],
                 '유동자산': ['유동자산'], 
-                '이익잉여금': ['이익잉여금', '미처분이익잉여금', '결손금', '미처리결손금'], 
+                '이익잉여금': ['이익잉여금', '미처분이익잉여금', '결손금', '미처리결손금', '이익잉여금(결손금)'], 
                 '현금성자산': ['현금및현금성자산', '현금 및 현금성자산', '현금', '현금성자산'],
                 '단기금융상품': ['단기금융상품', '유동금융자산', '기타유동금융자산', '단기매매증권', '단기투자자산', '금융기관예치금'],
-                '당기순이익': ['당기순이익', '법인세비용차감전순이익', '연결당기순이익', '보통주당기순이익', '당기순손익', '지배기업소유주지분순이익', '지배기업의 소유주에게 귀속되는 당기순이익'] 
+                '당기순이익': [
+                    '당기순이익', '법인세비용차감전순이익', '연결당기순이익', '보통주당기순이익', '당기순손익', 
+                    '지배기업소유주지분순이익', '지배기업의 소유주에게 귀속되는 당기순이익', '당기순이익(손실)', 
+                    '분기순이익', '분기순이익(손실)', '반기순이익', '반기순이익(손실)', '지배기업의 소유주에게 귀속되는 분기순이익',
+                    '지배기업의 소유주에게 귀속되는 반기순이익'
+                ] 
             }
             # Note: For Net Income, often '당기순이익' is the key. 
             # In 'CFS' (Consolidated), it is usually '당기순이익'.
@@ -61,7 +82,7 @@ class OpenDartClient:
 
             # 2. 계정명 매핑을 위한 Lookup Dictionary 생성 (속도 최적화)
             # account_nm -> row mapping
-            # 동일 account_nm이 여러 개일 경우 첫 번째 것 사용 (보통 유니크함)
+            # 동일 account_nm이 여러 개일 경우 첫 번째 것 사용
             account_map = df_main.set_index('account_nm').to_dict('index')
 
             result = {}
@@ -72,8 +93,36 @@ class OpenDartClient:
                     if name in account_map:
                         row_data = account_map[name]
                         vals = []
-                        for col in ['thstrm_amount', 'frmtrm_amount', 'bfefrmtrm_amount']:
-                            val_str = row_data.get(col, '0')
+                        
+                        # [Current, Prev, PrevPrev]
+                        # 1. Current Term: 분/반기 보고서일 경우 누적 금액(thstrm_add_amount) 우선 사용
+                        val_current_str = None
+                        if used_reprt_code != '11011': # 연말 보고서가 아니면
+                             val_current_str = row_data.get('thstrm_add_amount') # 누적 시도
+                        
+                        if not val_current_str or pd.isna(val_current_str) or str(val_current_str).strip() == '':
+                            val_current_str = row_data.get('thstrm_amount', '0') # 기본값
+
+                        # 2. Columns Loop
+                        cols_to_fetch = [
+                            (val_current_str, 'dummy'), # Already fetched for current
+                            ('frmtrm_amount', 'frmtrm_add_amount'), 
+                            ('bfefrmtrm_amount', 'bfefrmtrm_add_amount')
+                        ]
+
+                        for idx, (col_key, col_add_key) in enumerate(cols_to_fetch):
+                            val_str = '0'
+                            
+                            if idx == 0:
+                                val_str = col_key # Already resolved above
+                            else:
+                                # For past years in Q/Half reports, simple amount is usually fine for BS, 
+                                # but for P&L we might prefer Accumulated if formatted that way.
+                                # However, usually finstate puts full-year or comparable data in basic columns.
+                                # We'll stick to basic columns for past comparison to avoid complexity,
+                                # unless it's strictly empty.
+                                val_str = row_data.get(col_key, '0')
+                                
                             if not val_str or pd.isna(val_str):
                                 vals.append(0)
                                 continue
