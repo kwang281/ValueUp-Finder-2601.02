@@ -80,58 +80,109 @@ class OpenDartClient:
             if df_main.empty:
                 return getattr(self, "_mock_fail_data", None)
 
-            # 2. 계정명 매핑을 위한 Lookup Dictionary 생성 (속도 최적화)
-            # account_nm -> row mapping
-            # 동일 account_nm이 여러 개일 경우 첫 번째 것 사용
+            # 2. 계정명 매핑을 위한 Lookup Dictionary 생성
+            # Main Report (Current Data)
             account_map = df_main.set_index('account_nm').to_dict('index')
+
+            # Secondary Report (Historical Data) - If Main is NOT Annual
+            account_map_prev = {}
+            if used_reprt_code != '11011':
+                try:
+                    # Fetch Previous Year's Annual Report
+                    finstate_prev = self.dart.finstate(corp_code, year - 1, reprt_code='11011')
+                    if finstate_prev is not None and not finstate_prev.empty:
+                        # Prefer CFS, fallback to OFS
+                        df_prev = finstate_prev[finstate_prev['fs_div'] == 'CFS']
+                        if df_prev.empty:
+                            df_prev = finstate_prev[finstate_prev['fs_div'] == 'OFS']
+                        
+                        if not df_prev.empty:
+                            account_map_prev = df_prev.set_index('account_nm').to_dict('index')
+                except Exception as e:
+                    print(f"Error fetching historical annual report: {e}")
 
             result = {}
 
             # 3. 데이터 추출 함수 (Map 기반)
             def get_values_from_map(target_names):
+                # Search Priority: Try to find any matching name in current map first
+                matched_name_current = None
                 for name in target_names:
                     if name in account_map:
-                        row_data = account_map[name]
-                        vals = []
-                        
-                        # [Current, Prev, PrevPrev]
-                        # 1. Current Term: 분/반기 보고서일 경우 누적 금액(thstrm_add_amount) 우선 사용
-                        val_current_str = None
-                        if used_reprt_code != '11011': # 연말 보고서가 아니면
-                             val_current_str = row_data.get('thstrm_add_amount') # 누적 시도
-                        
-                        if not val_current_str or pd.isna(val_current_str) or str(val_current_str).strip() == '':
-                            val_current_str = row_data.get('thstrm_amount', '0') # 기본값
+                        matched_name_current = name
+                        break
+                
+                # Try to find match in prev map
+                matched_name_prev = None
+                if account_map_prev:
+                    for name in target_names:
+                        if name in account_map_prev:
+                            matched_name_prev = name
+                            break
+                
+                vals = [0, 0, 0] # [Current, Prev, PrevPrev]
 
-                        # 2. Columns Loop
-                        cols_to_fetch = [
-                            (val_current_str, 'dummy'), # Already fetched for current
-                            ('frmtrm_amount', 'frmtrm_add_amount'), 
-                            ('bfefrmtrm_amount', 'bfefrmtrm_add_amount')
-                        ]
+                # --- 1. Current Year Value ---
+                if matched_name_current:
+                    row_data = account_map[matched_name_current]
+                    
+                    # Accumulation Logic for Interim
+                    val_current_str = None
+                    if used_reprt_code != '11011': 
+                         val_current_str = row_data.get('thstrm_add_amount')
+                    
+                    if not val_current_str or pd.isna(val_current_str) or str(val_current_str).strip() == '':
+                        val_current_str = row_data.get('thstrm_amount', '0')
+                        
+                    try:
+                        vals[0] = int(str(val_current_str).replace(',', ''))
+                    except:
+                        vals[0] = 0
+                
+                # --- 2. Historical Values (Prev, PrevPrev) ---
+                if used_reprt_code != '11011' and matched_name_prev:
+                    # If we have a Previous Annual Report, use it for Year-1 and Year-2
+                    row_data_prev = account_map_prev[matched_name_prev]
+                    
+                    # Year-1 (thstrm_amount of Prev Annual)
+                    try:
+                        t_val = row_data_prev.get('thstrm_amount', '0')
+                        vals[1] = int(str(t_val).replace(',', ''))
+                    except:
+                        vals[1] = 0
+                        
+                    # Year-2 (frmtrm_amount of Prev Annual)
+                    try:
+                        f_val = row_data_prev.get('frmtrm_amount', '0')
+                        vals[2] = int(str(f_val).replace(',', ''))
+                    except:
+                        vals[2] = 0
+                        
+                elif matched_name_current:
+                    # Fallback: Use columns from Current Report (Standard Logic)
+                    row_data = account_map[matched_name_current]
+                    
+                    # Year-1
+                    cols_y1 = ['frmtrm_amount', 'frmtrm_add_amount'] # Fallback
+                    for c in cols_y1:
+                        try:
+                            v = row_data.get(c, '0')
+                            if v and not pd.isna(v):
+                                vals[1] = int(str(v).replace(',', ''))
+                                break
+                        except: pass
+                        
+                    # Year-2
+                    cols_y2 = ['bfefrmtrm_amount', 'bfefrmtrm_add_amount']
+                    for c in cols_y2:
+                        try:
+                            v = row_data.get(c, '0')
+                            if v and not pd.isna(v):
+                                vals[2] = int(str(v).replace(',', ''))
+                                break
+                        except: pass
 
-                        for idx, (col_key, col_add_key) in enumerate(cols_to_fetch):
-                            val_str = '0'
-                            
-                            if idx == 0:
-                                val_str = col_key # Already resolved above
-                            else:
-                                # For past years in Q/Half reports, simple amount is usually fine for BS, 
-                                # but for P&L we might prefer Accumulated if formatted that way.
-                                # However, usually finstate puts full-year or comparable data in basic columns.
-                                # We'll stick to basic columns for past comparison to avoid complexity,
-                                # unless it's strictly empty.
-                                val_str = row_data.get(col_key, '0')
-                                
-                            if not val_str or pd.isna(val_str):
-                                vals.append(0)
-                                continue
-                            try:
-                                vals.append(int(str(val_str).replace(',', '')))
-                            except:
-                                vals.append(0)
-                        return vals # [Current, Prev, PrevPrev]
-                return [0, 0, 0]
+                return vals
 
             for key, names in target_accounts.items():
                 result[key] = get_values_from_map(names)
