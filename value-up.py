@@ -240,6 +240,9 @@ def fetch_real_dashboard_data(api_key=None):
         
 
     if df_guide.empty:
+        # User Feedback for partial failure
+        st.toast("⚠️ 재무 데이터 수집에 실패하여 기본 시세 정보만 표시됩니다.", icon="⚠️")
+        
         # Fail-Safe: If CompanyGuide fails, fall back to basic KRX data
         # Initialize final_data with basic KRX info if it's empty
         if not final_data: 

@@ -189,8 +189,8 @@ def get_batch_company_data(codes, max_workers=10):
     (Blocking 방지를 위해 worker 수 조정: 4 -> 20)
     """
     results = []
-    # max_workers increased to 20 for speed
-    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+    # max_workers reduced to 8 for stability (Code Review Feedback)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         future_to_code = {executor.submit(get_company_snapshot, code): code for code in codes}
         
         for future in concurrent.futures.as_completed(future_to_code):
