@@ -92,37 +92,30 @@ def get_valid_cache():
     매일 16:00 (KST/UTC+9) 기준으로 유효한 캐시 파일이 있는지 확인하고 로드합니다.
 
     파일명 형식: company_data_YYYYMMDD_HHMMSS.json
+    Returns: (DataFrame, datetime) or (None, None)
     """
 
     if not os.path.exists(CACHE_DIR):
-
         os.makedirs(CACHE_DIR, exist_ok=True)
-
-        return None
-
+        return None, None
 
     # 기준 시간 설정 (매일 16:00 KST)
     now = datetime.datetime.now(KST)
-
     cutoff_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
     
-
     # 현재 시간이 16:00 이전이면, 어제 16:00가 기준
     if now < cutoff_time:
         cutoff_time = cutoff_time - datetime.timedelta(days=1)
         
-
     # 캐시 파일 검색
     files = glob.glob(os.path.join(CACHE_DIR, "company_data_*.json"))
 
     if not files:
-        return None
+        return None, None
         
-
     # 최신 파일 찾기
     latest_file = max(files, key=os.path.getctime)
     
-
     # 파일명에서 시간 파싱 (company_data_20241220_160500.json)
     try:
         filename = os.path.basename(latest_file)
@@ -132,29 +125,18 @@ def get_valid_cache():
         file_time_naive = datetime.datetime.strptime(time_str, "%Y%m%d_%H%M%S")
         file_time = file_time_naive.replace(tzinfo=KST)
         
-
         # 유효성 검사 (기준 시간 이후 생성된 파일인가?)
-
         if file_time >= cutoff_time:
-
             with open(latest_file, 'r', encoding='utf-8') as f:
-
                 data = json.load(f)
-
-                # st.toast removed to prevent CacheReplayClosureError
-
                 print(f"Loaded cache from {filename}")
-
-                return pd.DataFrame(data)
+                return pd.DataFrame(data), file_time
 
     except Exception as e:
-
         print(f"Cache Load Error: {e}")
-
-        return None
+        return None, None
         
-
-    return None
+    return None, None
 
 
 def save_daily_cache(df):
@@ -197,35 +179,30 @@ def save_daily_cache(df):
 # --- [Data Layer] Hybrid Data Generation (FinanceDataReader) ---
 
 @st.cache_data(ttl=3600)  # Re-enabled for Legacy Mode (CompanyGuide)
-
 def fetch_real_dashboard_data(api_key=None):
     """
-
     FinanceDataReader(fdr)와 FnGuide 크롤링을 사용하여 시가총액 상위 300개 종목의 주요 지표를 수집합니다.
 
     (Company Guide 크롤링 적용 - 배당수익률 포함 풍부한 데이터)
     """
 
     # 0. Daily Cache Check (JSON) - 매일 16:00 기준 유효한 파일이 있으면 즉시 반환
-
-    cached_df = get_valid_cache()
+    cached_df, cache_date = get_valid_cache()
 
     if cached_df is not None:
+        return cached_df, cache_date
 
-        return cached_df
-
+    # Current time for new data
+    current_date = datetime.datetime.now(KST)
 
     # 1. KRX 상장 리스트 가져오기
-
     df_krx = get_krx_listing()
 
     if df_krx.empty:
-
-        return pd.DataFrame()
+        return pd.DataFrame(), current_date
     
 
     # 2. 시가총액 상위 300개 (확장)
-
     # 2. 시가총액 상위 (KOSPI 200 + KOSDAQ 100)
     df_kospi = df_krx[df_krx['Market'].str.contains('KOSPI')].sort_values(by='Marcap', ascending=False).head(200)
     df_kosdaq = df_krx[df_krx['Market'].str.contains('KOSDAQ')].sort_values(by='Marcap', ascending=False).head(100)
@@ -235,153 +212,94 @@ def fetch_real_dashboard_data(api_key=None):
     
 
     # 3. 데이터 수집
-
     final_data = []
 
-
     if not api_key:
-
         # API Key 없으면 KRX 기본 정보만 리턴
-
         for idx, row in top_n.iterrows():
-
             final_data.append({
-
                 "종목명": row['Name'],
-
                 "종목코드": row['Code'],
-
                 "시장": row['Market'],  # [Added] Market
-
                 "업종": row.get('Sector', '미분류'),
-
                 "시가총액(억)": round(row['Marcap'] / 100000000),
-
                 "PBR(배)": 0, "PER(배)": 0, "배당수익률(%)": 0, "ROE(%)": 0,
-
                 "종합점수": 0
-
             })
 
-        return pd.DataFrame(final_data)
+        return pd.DataFrame(final_data), current_date
 
 
     # [CompanyGuide Crawling]
-
     if not target_codes:
-
-        return pd.DataFrame()
+        return pd.DataFrame(), current_date
 
 
     with st.spinner("CompanyGuide에서 300개 기업 데이터 수집 중... (약 120~300초 소요, 매일 16:00 업데이트)"):
-
         df_guide = get_batch_company_data(target_codes)
         
 
     if df_guide.empty:
-
         # Fail-Safe: If CompanyGuide fails, fall back to basic KRX data
-
         # Initialize final_data with basic KRX info if it's empty
-
         if not final_data: 
-
              for idx, row in top_n.iterrows():
-
                 final_data.append({
-
                         "종목명": row['Name'],
-
                         "종목코드": row['Code'],
-
                         "시장": row['Market'],
-
                         "업종": row.get('Sector', '미분류'),
-
                         "시가총액(억)": round(row['Marcap'] / 100000000),
-
                         "PBR(배)": 0, "배당수익률(%)": 0, "ROE(%)": 0,
-
                         "종합점수": 0, "이익잉여금비율(%)": 0, "현금비중(%)": 0, "PER(배)": 0
-
                 })
 
         result_df = pd.DataFrame(final_data).sort_values(by="종합점수", ascending=False)
-
         # Don't cache empty fail-safe results to avoid persisting bad state
-        return result_df
+        return result_df, current_date
 
 
     # 3. Merge
-
     guide_map = df_guide.set_index('code').to_dict('index')
 
     final_data = []
     
-
     for idx, row in top_n.iterrows():
-
         code = row['Code']
-
         g_data = guide_map.get(code, {})
         
-
         pbr = g_data.get('pbr', 0) or 0
-
         div = g_data.get('dividend_yield', 0) or 0
-
         roe = g_data.get('roe', 0) or 0
         
-
         ret_rate = g_data.get('retained_rate', 0)
-
         cash_rate = g_data.get('cash_ratio', 0)
         
-
         # Score Logic
-
         score = ((3 - min(pbr, 3)) * 30) + (div * 5) + (roe * 1.5)
         
-
         final_data.append({
-
             "종목명": row['Name'],
-
             "종목코드": code,
-
             "시장": row['Market'], # [Added] Market
-
             "업종": row.get('Sector', '미분류'),
-
             "시가총액(억)": round(row['Marcap'] / 100000000),
-
             "PBR(배)": round(pbr, 2),
-
             "PER(배)": round(g_data.get('per', 0) or 0, 2),
-
             "배당수익률(%)": round(div, 2), 
-
             "ROE(%)": round(roe, 1),
-
             "종합점수": round(score, 1),
-
             "이익잉여금비율(%)": float(ret_rate), 
-
             "현금비중(%)": float(cash_rate)
-
         })
         
-
     result_df = pd.DataFrame(final_data).sort_values(by="종합점수", ascending=False)
     
-
     # [Save Daily Cache]
-
     if not result_df.empty:
-
         save_daily_cache(result_df)
         
-    return result_df
+    return result_df, current_date
 
 
 
@@ -573,15 +491,24 @@ def fetch_real_company_data(corp_code, api_key, base_year=2024):
 
 
 def render_dashboard(api_key):
-
-    st.header("🚀 저평가 우량주 발굴 (Top 300)"
-)
-    st.caption("시가총액 상위 300개 기업 중 PBR, 현금흐름, 주주환원 등을 종합적으로 분석하여 점수를 산출합니다.")
     
-
-    # 데이터 로드
-
-    df_result = fetch_real_dashboard_data(api_key)
+    # Pre-render a placeholder for immediate feedback or structure
+    placeholder = st.empty()
+    
+    # Fetch Data (this might take time if crawling)
+    df_result, data_date = fetch_real_dashboard_data(api_key)
+    
+    # Render Header with Date
+    with placeholder.container():
+        c_header, c_date = st.columns([3, 1])
+        with c_header:
+            st.header("🚀 저평가 우량주 발굴 (Top 300)")
+        with c_date:
+            if data_date:
+                date_str = data_date.strftime("%Y.%m.%d")
+                st.markdown(f"<div style='text-align: right; color: black; font-weight: bold; font-size: 1.5rem; margin-top: 10px;'>Update: {date_str}</div>", unsafe_allow_html=True)
+                
+    st.caption("시가총액 상위 300개 기업 중 PBR, 현금흐름, 주주환원 등을 종합적으로 분석하여 점수를 산출합니다.")
     
 
     if df_result.empty:
