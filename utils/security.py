@@ -67,7 +67,22 @@ def load_credentials(pin: str):
         return None # 복호화 실패 (PIN 불일치 등)
 
 def load_from_env():
-    """환경 변수에서 API Key를 로드합니다 (GitHub Actions 등)."""
+    """
+    API Key를 로드합니다.
+    우선순위:
+    1. Streamlit Secrets (Cloud 배포 환경)
+    2. 환경 변수 (GitHub Actions, 로컬 환경 등)
+    """
+    # 1. Check Streamlit Secrets
+    try:
+        if "OPENDART_API" in st.secrets:
+            return st.secrets["OPENDART_API"]
+    except FileNotFoundError:
+        pass # 로컬에서 secrets.toml이 없는 경우 무시
+    except Exception:
+        pass
+
+    # 2. Check Environment Variables
     return os.environ.get("OPENDART_API")
 
 def check_credentials_exist():

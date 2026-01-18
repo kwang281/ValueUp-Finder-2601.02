@@ -14,8 +14,9 @@ jobs:
           python-version: '3.9'
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run App
+      - name: Verify Secrets and Syntax
         env:
           OPENDART_API: ${{ secrets.OPENDART_API }}
         run: |
-          streamlit run value-up.py
+          mkdir -p tests
+          python tests/test_ci.py

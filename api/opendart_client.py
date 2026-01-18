@@ -5,6 +5,7 @@ class OpenDartClient:
     def __init__(self, api_key):
         self.api_key = api_key
         self.init_error = None
+        self.dart = None
         if api_key:
             try:
                 self.dart = OpenDartReader(api_key)
