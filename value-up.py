@@ -1789,7 +1789,7 @@ def main():
     st.sidebar.subheader("🔐 API 설정 (보안)")
 
 
-    # 1. Environment Variable Check (GitHub Actions / DotEnv)
+    # 1. Streamlit Secrets Check
     env_key = load_from_env()
     
     # 2. Existing Credentials Check (Local)
@@ -1804,7 +1804,7 @@ def main():
 
     # Decide UI Flow
     if env_key:
-        st.sidebar.success("🔐 API Key (시스템/환경변수)")
+        st.sidebar.success("🔐 API Key (Streamlit Secrets)")
         # Skip Setup/Unlock forms if Env Key is present and active
         current_key = env_key # Ensure it's set
         st.session_state['api_key'] = env_key

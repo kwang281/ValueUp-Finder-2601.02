@@ -69,9 +69,7 @@ def load_credentials(pin: str):
 def load_from_env():
     """
     API Key를 로드합니다.
-    우선순위:
-    1. Streamlit Secrets (Cloud 배포 환경)
-    2. 환경 변수 (GitHub Actions, 로컬 환경 등)
+    Streamlit Cloud 배포 환경의 Secrets를 우선적으로 확인합니다.
     """
     # 1. Check Streamlit Secrets
     try:
@@ -82,8 +80,7 @@ def load_from_env():
     except Exception:
         pass
 
-    # 2. Check Environment Variables
-    return os.environ.get("OPENDART_API")
+    return None
 
 def check_credentials_exist():
     """자격 증명 파일이 존재하는지 확인합니다."""
